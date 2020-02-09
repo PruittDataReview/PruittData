@@ -1,0 +1,898 @@
+# Code: spider dietary niche variation
+
+library(vegan)
+library(ggplot2)
+library(scales)
+library(RInSp)
+library(lme4)
+library(car)
+library(glmmTMB)
+library(MuMIn)
+library(sjPlot)
+library(adespatial)
+library(ade4)
+library(ape)
+library(piecewiseSEM)
+library(AICcmodavg)
+library(bbmle)
+
+#setwd("~/Dropbox/Anelosimus spider niche")
+
+dtsd = read.table("dataspider.txt", h = T)
+
+str(dtsd)
+
+# reducing dimensionality of diet data:
+diets = dtsd
+str(diets)
+dim(diets)
+
+# removing individuals (lines) with 0 captured prey
+which(rowSums(diets[, 10:15]) == 0)
+diets[138,]
+diets2 = diets[-which(diets$ID == diets[138,]$ID), ]
+dim(diets2)
+
+# Reducing dimensionality of diet composition data:
+set.seed(7)
+
+dietnmds = metaMDS(diets2[, 10:15], k = 2, trymax = 100)
+stressplot(dietnmds)
+scores(dietnmds)
+dietnmds$species
+
+diets2[, c(16, 17)] = scores(dietnmds)
+names(diets2)[c(16, 17)] = c("nmds1", "nmds2")
+
+
+# Trying to reduce to only 1 dim:
+dietnmds1 = metaMDS(diets2[, 10:15], k = 1, trymax = 100)
+stressplot(dietnmds1)
+diets2[, 18] = scores(dietnmds1)
+names(diets2)[18] = "nmds"
+
+
+# plot: Fig 1 manuscript:
+cols = c(rep("tan2", 74), rep("cornflowerblue", 64))
+table(diets2$Spp)
+
+
+plot(
+  dietnmds,
+  display = "sites",
+  type = "n",
+  xlab = "nMDS 1",
+  ylab = "nMDS 2",
+  ylim = c(-1, 1)
+)
+
+arrows(
+  x0 = scores(dietnmds)[which(diets2$Time == 1), 1],
+  y0 =  scores(dietnmds)[which(diets2$Time == 1), 2],
+  x1 =  scores(dietnmds)[which(diets2$Time == 2), 1],
+  y1 =  scores(dietnmds)[which(diets2$Time == 2), 2],
+  length = 0.1,
+  lwd = 0.5,
+  angle = 8,
+  code = 2,
+  col = "gray78"
+)
+
+points(
+  dietnmds,
+  display = "sites",
+  col = alpha(cols, 0.8),
+  pch = 16,
+  cex = 2
+)
+points(dietnmds,
+       display = "species",
+       pch = 16,
+       col = "gray48")
+arrows(
+  x0 = 0,
+  y0 =  0,
+  x1 =  dietnmds$species[, 1],
+  y1 =  dietnmds$species[, 2],
+  length = 0,
+  lwd = 4,
+  angle = 8,
+  code = 2,
+  col = "gray48"
+)
+
+# getting the short format:
+dtarr = cbind(diets2[diets2$Time == 1,], diets2[diets2$Time == 2, c(16, 17)])
+str(dtarr)
+dim(dtarr)
+names(dtarr)[c(16, 17, 18, 19)] = c("nmds1t1", "nmds2t1", "nmds1t2", "nmds2t2")
+
+str(diets2)
+diets2$LR = scale(diets2$LR)
+diets2$LA = scale(diets2$LA)
+dtarrb = cbind(diets2[diets2$Time == 1,], diets2[diets2$Time == 2, c(5, 6)])
+str(dtarrb)
+dim(dtarrb)
+names(dtarrb)[c(5, 6, 18, 19)] = c("LA1", "LR1", "LA2", "LR2")
+#dtarrb[,c(5, 6, 18, 19)] = scale(dtarrb[,c(5, 6, 18, 19)])
+
+# Obtaining metrics of individual niche variation:
+dtAs = diets2[which(diets2$Spp == "Astudiosus"),]
+
+dtTm = diets2[which(diets2$Spp == "Tmurarium"),]
+
+diets2[, 10:15]
+
+# calculating PSi to get within-ind variation:
+
+ISt1 = import.RInSp(
+  diets2,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "1"))
+)
+
+
+ISt2 = import.RInSp(
+  diets2,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "2"))
+)
+
+ISAs1 = import.RInSp(
+  dtAs,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "1"))
+)
+
+
+ISAs2 = import.RInSp(
+  dtAs,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "2"))
+)
+
+ISTm2 = import.RInSp(
+  dtTm,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "2"))
+)
+
+ISTm1 = import.RInSp(
+  dtTm,
+  col.header = T,
+  subset.column = c(10:15),
+  info.cols = c(1:8),
+  subset.rows = c(c("Time", "1"))
+)
+
+
+PSiAs1 = PSicalc(ISAs1, exclude = FALSE,
+                 replicates = 99)
+PSiAs2 = PSicalc(ISAs2, exclude = FALSE,
+                 replicates = 99)
+PSiTm1 = PSicalc(ISTm1, exclude = FALSE,
+                 replicates = 99)
+PSiTm2 = PSicalc(ISTm2, exclude = FALSE,
+                 replicates = 99)
+
+PSit1 = PSicalc(ISt1, exclude = FALSE,
+                replicates = 99)
+PSit2 = PSicalc(ISt2, exclude = FALSE,
+                replicates = 99)
+
+
+diets2[, 19] = c(PSiAs1$PSi, PSiTm1$PSi, PSiAs2$PSi, PSiTm2$PSi)
+names(diets2)[19] = "PSi"
+
+hist(diets2$PSi)
+
+
+
+
+######################################################################
+########### ############## ############## ############# ##############
+
+### Model selection:
+
+### Total Prey:
+
+# 0) null:
+
+nNull = lmer(TotalPrey ~ 1 + (1 | ID), data = diets2)
+
+# 1) Morphology model:
+
+nMorp1 = lmer(TotalPrey ~ scale(Pwidt) * Spp + scale(WebVol) * Spp +
+                (1 | ID), data = diets2)
+AIC(nMorp1)
+
+nMorp2 = lmer(TotalPrey ~ poly(scale(Pwidt), 2) * Spp + scale(WebVol) *
+                Spp +
+                (1 | ID),
+              data = diets2)
+AIC(nMorp2)
+
+nMorp3 = lmer(TotalPrey ~ scale(Pwidt) * Spp + poly(scale(WebVol), 2) *
+                Spp +
+                (1 | ID), data = diets2)
+AIC(nMorp3)
+
+nMorp4 = lmer(TotalPrey ~  poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+                Spp +
+                (1 | ID),
+              data = diets2)
+AIC(nMorp4)
+
+# lowest aic = nMorp4
+rsquared(nMorp4)
+
+### 2) Behavioral model:
+nBeh1 = lmer(TotalPrey ~ LA * Spp + LR * Spp +
+               (1 | ID), data = diets2)
+AIC(nBeh1)
+
+nBeh2 = lmer(TotalPrey ~ poly(LA, 2) * Spp + LR * Spp +
+               (1 | ID), data = diets2)
+AIC(nBeh2)
+
+nBeh3 = lmer(TotalPrey ~ LA * Spp + poly(LR, 2) * Spp +
+               (1 | ID), data = diets2)
+AIC(nBeh3)
+
+nBeh4 = lmer(TotalPrey ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+               (1 | ID), data = diets2)
+AIC(nBeh4)
+
+# # lowest aic = nBeh4
+rsquared(nBeh4)
+
+### 3) Env model:
+nEnv = lmer(TotalPrey ~ Tree * Spp +
+              (1 | ID), data = diets2)
+
+### 4) Full:
+nFull = lmer(
+  TotalPrey ~ poly(LA, 2) * Spp + LR * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+    Tree * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+### 5) Combined models:
+# n12: Beh + Morp
+n12 = lmer(
+  TotalPrey ~ poly(LA, 2) * Spp + LR * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+#n13: Env + Morp
+n13 = lmer(TotalPrey ~ Tree * Spp +
+             poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+             (1 | ID),
+           data = diets2)
+
+#n13: Env + Beh
+n23 = lmer(TotalPrey ~ Tree * Spp +
+             poly(LA, 2) * Spp + LR * Spp +
+             (1 | ID), data = diets2)
+
+### model list: Total Prey:
+model_listTP = list(nNull, nMorp4, nBeh4, nEnv, n12, n13, n23, nFull)
+model_namesTP = c("null",
+                  "morp",
+                  "beh",
+                  "env",
+                  "morp_beh",
+                  "morp_env",
+                  "beh_env",
+                  "full")
+modelselTP = aictab(model_listTP, model_namesTP, second.ord = F)
+modelselTP
+
+# Model results
+Anova(n12)
+
+# plots:
+
+diets2t1 = diets2[diets2$Time == 1,]
+diets2t2 = diets2[diets2$Time == 2,]
+
+indmeans = data.frame(
+  aggregate(diets2$LA, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$nmds1, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = mean)[, 2],
+  diets2t1$Spp
+)
+
+names(indmeans)[1] = "mLA"
+names(indmeans)[2] = "mnMDS1"
+names(indmeans)[3] = "mTP"
+names(indmeans)[4] = "mSpp"
+
+indmeans2 = data.frame(
+  aggregate(diets2$LA, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$nmds2, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = mean)[, 2],
+  diets2t1$Spp
+)
+
+names(indmeans2)[1] = "mLA"
+names(indmeans2)[2] = "mnMDS2"
+names(indmeans2)[3] = "mTP"
+names(indmeans2)[4] = "mSpp"
+
+
+#Plots
+
+hist(diets2$TotalPrey)
+
+indsums = data.frame(aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = sum)[, 2],
+                     diets2t1$Spp)
+names(indsums)[1] = "TP"
+names(indsums)[2] = "Spp"
+
+#LA:
+ggplot(diets2, aes(
+  x = LA,
+  y = TotalPrey,
+  group = Spp,
+  col = Spp
+)) +
+  stat_smooth(aes(),
+              method = "lm",
+              formula = y ~ x + I(x ^ 2),
+              size = 2) +
+  xlab("Latency to attack (scaled)") + ylab ("Total number of prey") +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black")
+  ) +
+  geom_line(col = alpha('gray', 0.5), aes(group = ID)) +
+  geom_point(aes(), pch = 4) +
+  geom_point(
+    data = indmeans,
+    mapping = aes(
+      x = mLA,
+      y = mTP,
+      group = mSpp,
+      col = mSpp
+    ),
+    pch = 16,
+    size = 4
+  ) +
+  scale_color_manual(
+    values = c(alpha("tan2", 0.75), alpha("cornflowerblue", 0.75)),
+    name = "Species",
+    breaks = c("Astudiosus", "Tmurarium"),
+    labels = c(expression(italic(
+      "Anelosimus studiosus"
+    )),
+    expression(italic(
+      "Theridion murarium"
+    )))
+  )
+
+#########################################
+
+#### nMDS (1 and 2):
+
+######## NMDS1 as response variable:
+
+# 0) null:
+
+nm1Null = lmer(nmds1 ~ 1 + (1 | ID), data = diets2)
+
+### 1) Morphology model:
+
+nm1Morp1 = lmer(nmds1 ~ scale(Pwidt) * Spp + scale(WebVol) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm1Morp1)
+
+nm1Morp2 = lmer(nmds1 ~ poly(scale(Pwidt), 2) * Spp + scale(WebVol) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm1Morp2)
+
+nm1Morp3 = lmer(nmds1 ~ scale(Pwidt) * Spp + poly(scale(WebVol), 2) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm1Morp3)
+
+nm1Morp4 = lmer(nmds1 ~  poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+                  Spp +
+                  (1 | ID), data = diets2)
+AIC(nm1Morp4)
+rsquared(nm1Morp4)
+
+# lowest aic = nMorp4
+
+### 2) Behavioral model:
+nm1Beh1 = lmer(nmds1 ~ LA * Spp + LR * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm1Beh1)
+
+nm1Beh2 = lmer(nmds1 ~ poly(LA, 2) * Spp + LR * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm1Beh2)
+
+nm1Beh3 = lmer(nmds1 ~ LA * Spp + poly(LR, 2) * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm1Beh3)
+
+nm1Beh4 = lmer(nmds1 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm1Beh4)
+
+# lowest aic = nBeh4
+rsquared(nm1Beh4)
+
+### 3) Env model:
+nm1Env = lmer(nmds1 ~ Tree * Spp +
+                (1 | ID), data = diets2)
+
+### 4) Full:
+nm1Full = lmer(
+  nmds1 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+    Spp +
+    Tree * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+### Combined models:
+# nm112 = Beh + Morp
+nm112 = lmer(
+  nmds1 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+# nm113 = Env + Morp
+nm113 = lmer(nmds1 ~ Tree * Spp +
+               poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+               (1 | ID),
+             data = diets2)
+
+# nm123 = Env + Beh
+nm123 = lmer(nmds1 ~ Tree * Spp +
+               poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+               (1 | ID), data = diets2)
+
+# Model list nMDS1:
+model_listDS1 = list(nm1Null, nm1Morp4, nm1Beh4, nm1Env, nm112, nm113, nm123, nm1Full)
+model_namesDS1 = c("null",
+                   "morp",
+                   "beh",
+                   "env",
+                   "morp_beh",
+                   "morp_env",
+                   "beh_env",
+                   "full")
+modelselDS1 = aictab(model_listDS1, model_namesDS1, second.ord = F)
+modelselDS1
+
+# Model results:
+Anova(nm112)
+
+
+####################
+# nMDS2:
+
+### 0) null:
+
+nm2Null = lmer(nmds2 ~ 1 + (1 | ID), data = diets2)
+
+### 1) Morphology model:
+
+nm2Morp1 = lmer(nmds2 ~ scale(Pwidt) * Spp + scale(WebVol) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm2Morp1)
+
+nm2Morp2 = lmer(nmds2 ~ poly(scale(Pwidt), 2) * Spp + scale(WebVol) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm2Morp2)
+
+nm2Morp3 = lmer(nmds2 ~ scale(Pwidt) * Spp + poly(scale(WebVol), 2) * Spp +
+                  (1 | ID), data = diets2)
+AIC(nm2Morp3)
+
+nm2Morp4 = lmer(nmds2 ~  poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+                  Spp +
+                  (1 | ID), data = diets2)
+AIC(nm2Morp4)
+
+# lowest aic = nm2Morp4
+
+### 2) Behavioral model:
+nm2Beh1 = lmer(nmds2 ~ LA * Spp + LR * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm2Beh1)
+
+nm2Beh2 = lmer(nmds2 ~ poly(LA, 2) * Spp + LR * Spp +
+                 (1 | ID), data = diets2)
+
+AIC(nm2Beh2)
+
+nm2Beh3 = lmer(nmds2 ~ LA * Spp + poly(LR, 2) * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm2Beh3)
+
+nm2Beh4 = lmer(nmds2 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+                 (1 | ID), data = diets2)
+AIC(nm2Beh4)
+
+# lowest aic = nm2Beh4
+
+### 3) Env model:
+nm2Env = lmer(nmds2 ~ Tree * Spp +
+                (1 | ID), data = diets2)
+
+### 4) Full:
+nm2Full = lmer(
+  nmds2 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+    Spp +
+    Tree * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+### 5) Combined models:
+# nm212 = Beh + Morp
+nm212 = lmer(
+  nmds2 ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+    (1 | ID),
+  data = diets2
+)
+
+# nm213 = Env + Morp
+nm213 = lmer(nmds2 ~ Tree * Spp +
+               poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+               (1 | ID),
+             data = diets2)
+
+
+# nm223 = Env + Beh
+nm223 = lmer(nmds2 ~ Tree * Spp +
+               poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+               (1 | ID), data = diets2)
+
+### Model list nMDS2:
+model_listDS2 = list(nm2Null, nm2Morp4, nm2Beh4, nm2Env, nm212, nm213, nm223, nm2Full)
+model_namesDS2 = c("null",
+                   "morp",
+                   "beh",
+                   "env",
+                   "morp_beh",
+                   "morp_env",
+                   "beh_env",
+                   "full")
+modelselDS2 = aictab(model_listDS2, model_namesDS2, second.ord = F)
+modelselDS2
+
+# plot
+ggplot(diets2, aes(
+  x = LA,
+  y = nmds2,
+  group = Spp,
+  col = Spp
+)) +
+  stat_smooth(aes(),
+              method = "lm",
+              formula = y ~ x + I(x ^ 2),
+              size = 2) +
+  xlab("Latency to attack (scaled)") + ylab ("nMDS 2") +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black")
+  ) +
+  geom_line(col = alpha('gray', 0.5), aes(group = ID)) +
+  geom_point(aes(col = Spp), pch = 4) +
+  scale_color_manual(values = c(alpha("tan2", 0.75), alpha("cornflowerblue", 0.75))) +
+  geom_point(
+    data = indmeans2,
+    mapping = aes(
+      x = mLA,
+      y = mnMDS2,
+      group = mSpp,
+      col = mSpp
+    ),
+    pch = 16,
+    size = 4
+  )
+
+########### ####################### #################### ##################
+##### PSi:
+
+### 0)  PSi Null:
+
+PSisNull = glmmTMB(PSi ~ 1 +
+                     (1 | ID),
+                   data = diets2,
+                   family = list(family = "beta", link = "logit"))
+
+### 1) Morphological model:
+PSisM = glmmTMB(
+  PSi ~ scale(Pwidt) * Spp + scale(WebVol) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisM)
+
+PSisM2 = glmmTMB(
+  PSi ~ poly(scale(Pwidt), 2) * Spp + scale(WebVol) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisM2)
+
+PSisM3 = glmmTMB(
+  PSi ~ scale(Pwidt) * Spp + poly(scale(WebVol), 2) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisM3)
+
+PSisM4 = glmmTMB(
+  PSi ~ poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisM4)
+
+
+### 2) Behavioral model:
+PSisB = glmmTMB(
+  PSi ~ LA * Spp + LR * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisB)
+
+PSisB2 = glmmTMB(
+  PSi ~ poly(LA, 2) * Spp + LR * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisB2)
+
+PSisB3 = glmmTMB(
+  PSi ~ LA * Spp + poly(LR, 2) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisB3)
+
+PSisB4 = glmmTMB(
+  PSi ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+AIC(PSisB4)
+
+
+### 3) Microhabitat model
+PSisEnv = glmmTMB(
+  PSi ~ Tree * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+
+### 4) Full model:
+
+PSisFull = glmmTMB(
+  PSi ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+    Spp +
+    Tree * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+
+### 5) Combined models:
+
+# PSis12 = Beh + Morp
+PSis12 = glmmTMB(
+  PSi ~ poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+    Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+
+# PSis13 = Env + Morp
+PSis13 = glmmTMB(
+  PSi ~ Tree * Spp +
+    poly(scale(Pwidt), 2) * Spp + poly(scale(WebVol), 2) *
+    Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+
+# PSis23 = Env + Beh
+PSis23 = glmmTMB(
+  PSi ~ Tree * Spp +
+    poly(LA, 2) * Spp + poly(LR, 2) * Spp +
+    (1 | ID),
+  data = diets2,
+  family = list(family = "beta", link = "logit")
+)
+
+# Model list R1
+model_listPS = list(PSisNull, PSisM, PSisB, PSisEnv, PSis12, PSis13, PSis23, PSisFull)
+model_namesPS = c("null",
+                  "morp",
+                  "beh",
+                  "env",
+                  "morp_beh",
+                  "morp_env",
+                  "beh_env",
+                  "full")
+modelselPS = AICtab(model_listPS, model_namesPS) # apparently it doesn't work for glmmTMB
+AIC(PSisNull, PSisM, PSisB, PSisEnv, PSis12, PSis13, PSis23, PSisFull)
+AICtab(PSisNull, PSisM, PSisB, PSisEnv, PSis12, PSis13, PSis23, PSisFull)
+# Feb 3rd 2020:  These results are slightly different from what's reported in the SuppMat
+# However qualitatively the results are the same: The null model is equally parsimonious in these cases
+
+
+#####################################################
+
+# Looking at the most parsimonious models:
+
+# 1 - Total Prey:
+
+# Combined model 1 & 2:
+
+# Best model:
+#       n12 = lmer(TotalPrey ~ poly(LA,2)*Spp + LR*Spp +
+#            poly(scale(Pwidt),2)*Spp + poly(scale(WebVol),2)*Spp +
+#           (1|ID), data = diets2)
+
+n12
+Anova(n12)
+rsquared(n12)
+
+########################
+
+# 2 - nMDS 1 and 2
+
+# Best model:
+# Combined model 1 & 2:
+
+# nm112 = lmer(nmds1 ~ poly(LA,2)*Spp + poly(LR,2)*Spp +
+# poly(scale(Pwidt),2)*Spp + poly(scale(WebVol),2)*Spp +
+# (1|ID), data = diets2)
+
+# nm212
+
+nm112
+Anova(nm112)
+
+nm212
+Anova(nm212)
+
+
+###########################
+###########################
+
+
+# Looking at beta diet:
+
+# Getting a metric of beta-diet variation:
+BrayCurtis = c()
+for (i in 1:length(unique(diets2$ID))) {
+  IDi = unique(diets2$ID)[i]
+  BrayCurtis[i] =
+    vegdist(diets2[which(diets2$ID == IDi), 9:14])
+}
+
+hist(BrayCurtis)
+length(BrayCurtis)
+
+betadiet = data.frame(
+  BrayCurtis,
+  aggregate(diets2$LA, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$LA, by = list(diets2$ID), FUN = var)[, 2],
+  aggregate(diets2$LR, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$LR, by = list(diets2$ID), FUN = var)[, 2],
+  aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = mean)[, 2],
+  aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = var)[, 2],
+  aggregate(diets2$TotalPrey, by = list(diets2$ID), FUN = sum)[, 2],
+  diets2t1$Spp,
+  diets2t1$Tree,
+  diets2t1$Pwidt,
+  diets2t1$WebVol
+)
+
+names(betadiet) = c(
+  "betadiet",
+  "meanLA",
+  "varLA",
+  "meanLR",
+  "varLR",
+  "meanTP",
+  "varTP",
+  "sumTP",
+  "Spp",
+  "Tree",
+  "Pwidt",
+  "WebVol"
+)
+
+
+# Candidate models:
+BetaNull = glm(betadiet ~ 1, data = betadiet)
+
+BetaMorf = glm(betadiet ~ Pwidt * Spp + WebVol * Spp, data = betadiet)
+
+BetaBeh = glm(betadiet ~ meanLA * Spp + varLA * Spp + meanLR * Spp + varLR *
+                Spp, data = betadiet)
+
+BetaTree = glm(betadiet ~ Tree * Spp, data = betadiet)
+
+BetaFull = glm(betadiet ~ Pwidt * Spp + WebVol * Spp + Tree * Spp + meanLA *
+                 Spp + varLA * Spp,
+               data = betadiet)
+
+# Combined models:
+
+Beta12 = glm(betadiet ~ Pwidt * Spp + WebVol * Spp + meanLA * Spp + varLA *
+               Spp, data = betadiet)
+
+Beta13 = glm(betadiet ~ Pwidt * Spp + WebVol * Spp + Tree * Spp, data = betadiet)
+
+Beta23 = glm(betadiet ~ Tree * Spp + meanLA * Spp + varLA * Spp + meanLR *
+               Spp + varLR * Spp,
+             data = betadiet)
+
+# model list R1
+model_listBe = list(BetaNull,
+                    BetaMorf,
+                    BetaBeh,
+                    BetaTree,
+                    Beta12,
+                    Beta13,
+                    Beta23,
+                    BetaFull)
+model_namesBe = c("null",
+                  "morp",
+                  "beh",
+                  "env",
+                  "morp_beh",
+                  "morp_env",
+                  "beh_env",
+                  "full")
+modelselBe = aictab(model_listBe, model_namesBe, second.ord = F)
+modelselBe
+
+Anova(BetaFull)
